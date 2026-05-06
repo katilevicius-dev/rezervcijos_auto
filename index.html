@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rezervacijos</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+<style>
+body { font-family: Arial; padding:15px; background:#f4f6f8 }
+
+input, select, button {
+  padding:10px;
+  margin:5px;
+}
+
+.calendar {
+  display:grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap:5px;
+  margin-top:20px;
+  max-height:500px;
+  overflow-y:auto;
+}
+
+.day {
+  background:white;
+  padding:6px;
+  min-height:70px;
+  border-radius:6px;
+  font-size:11px;
+}
+
+.busy { background:#ffe0e0 }
+
+h3 { grid-column: span 7; }
+
+table {
+  width:100%;
+  background:white;
+  margin-top:20px;
+  border-collapse: collapse;
+}
+
+td, th {
+  padding:10px;
+  border-bottom:1px solid #ddd;
+}
+
+.hidden { display:none }
+
+.login {
+  max-width:300px;
+  margin:100px auto;
+  text-align:center;
+}
+
+ul { padding:0; }
+li { list-style:none; margin:5px 0; }
+
+@media (max-width: 600px) {
+  .calendar { grid-template-columns: repeat(2, 1fr); }
+  .day { font-size:10px; min-height:60px; }
+  input, select, button { width:100%; margin:3px 0; }
+  table { font-size:12px; }
+}
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="loginBox" class="login">
+  <h2>Prisijungimas</h2>
+  <input type="password" id="pass" placeholder="Slaptažodis">
+  <br>
+  <button onclick="login()">Prisijungti</button>
+</div>
+
+<!-- SISTEMA -->
+<div id="panel" class="hidden">
+
+<h2>Rezervacijų valdymas</h2>
+
+<!-- AUTO VALDYMAS -->
+<h3>Auto valdymas</h3>
+<input type="text" id="newCar" placeholder="Naujas auto">
+<button onclick="addCar()">Pridėti auto</button>
+<ul id="carList"></ul>
+
+<hr>
+
+<select id="car"></select>
+
+<input type="date" id="from">
+<input type="date" id="to">
+<input type="text" id="name" placeholder="Klientas">
+<input type="number" id="price" placeholder="€/diena">
+
+<button onclick="addBooking()">Pridėti</button>
+
+<table>
+<thead>
+<tr>
+<th>Auto</th>
+<th>Nuo</th>
+<th>Iki</th>
+<th>Klientas</th>
+<th>Dienos</th>
+<th>Suma €</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="list"></tbody>
+</table>
+
+<div id="calendar" class="calendar"></div>
+
+</div>
+
+<script>
+const PASSWORD = "1234";
+
+function login() {
+  if (document.getElementById('pass').value === PASSWORD) {
+    document.getElementById('loginBox').style.display = 'none';
+    document.getElementById('panel').classList.remove('hidden');
+
+    loadCars();
+    loadBookings();
+  } else {
+    alert("Blogas slaptažodis");
+  }
+}
+
+// FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyDc3fpqG_J3hECJOMWeGk_M_JabLGkAGaM",
+  authDomain: "nuoma-auto.firebaseapp.com",
+  projectId: "nuoma-auto",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let bookings = [];
+
+// ELEMENTAI
+const carEl = document.getElementById("car");
+const fromEl = document.getElementById("from");
+const toEl = document.getElementById("to");
+const nameEl = document.getElementById("name");
+const priceEl = document.getElementById("price");
+const list = document.getElementById("list");
+const calendar = document.getElementById("calendar");
+
+// AUTO
+
+function loadCars() {
+  db.collection("cars").onSnapshot(snap => {
+    carEl.innerHTML = "";
+    document.getElementById("carList").innerHTML = "";
+
+    snap.forEach(doc => {
+      const c = doc.data();
+
+      // select
+      const opt = document.createElement("option");
+      opt.textContent = c.name;
+      carEl.appendChild(opt);
+
+      // list
+      document.getElementById("carList").innerHTML += `
+        <li>
+          ${c.name}
+          <button onclick="deleteCar('${doc.id}')">X</button>
+        </li>
+      `;
+    });
+  });
+}
+
+async function addCar() {
+  const name = document.getElementById("newCar").value.trim();
+  if (!name) return;
+
+  await db.collection("cars").add({ name });
+  document.getElementById("newCar").value = "";
+}
+
+async function deleteCar(id) {
+  await db.collection("cars").doc(id).delete();
+}
+
+// DIENOS
+function calcDays(from, to) {
+  return Math.floor((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1;
+}
+
+// ADD BOOKING
+async function addBooking() {
+  const car = carEl.value;
+  const from = fromEl.value;
+  const to = toEl.value;
+  const name = nameEl.value;
+  const price = Number(priceEl.value);
+
+  if (!from || !to || !name || !price) return alert("Užpildyk viską");
+  if (from > to) return alert("Blogos datos");
+
+  for (let b of bookings) {
+    if (b.car === car && !(to < b.from || from > b.to)) {
+      return alert("Auto jau užimtas!");
+    }
+  }
+
+  await db.collection("bookings").add({ car, from, to, name, price });
+
+  fromEl.value = "";
+  toEl.value = "";
+  nameEl.value = "";
+  priceEl.value = "";
+}
+
+// DELETE BOOKING
+async function deleteBooking(id) {
+  await db.collection("bookings").doc(id).delete();
+}
+
+// LOAD BOOKINGS
+function loadBookings() {
+  db.collection("bookings").onSnapshot(snap => {
+    bookings = [];
+    list.innerHTML = "";
+
+    snap.forEach(doc => {
+      const b = doc.data();
+      b.id = doc.id;
+      bookings.push(b);
+
+      const days = calcDays(b.from, b.to);
+      const sum = days * (b.price || 0);
+
+      list.innerHTML += `
+        <tr>
+          <td>${b.car}</td>
+          <td>${b.from}</td>
+          <td>${b.to}</td>
+          <td>${b.name}</td>
+          <td>${days}</td>
+          <td>${sum} €</td>
+          <td><button onclick="deleteBooking('${b.id}')">X</button></td>
+        </tr>
+      `;
+    });
+
+    renderCalendar();
+  });
+}
+
+// CALENDAR
+function renderCalendar() {
+  calendar.innerHTML = "";
+  const today = new Date();
+  let currentMonth = "";
+
+  for (let i = 0; i < 120; i++) {
+    const d = new Date();
+    d.setDate(today.getDate() + i);
+
+    const dateStr = d.toISOString().split('T')[0];
+
+    const month = d.toLocaleString('lt-LT', {
+      month: 'long',
+      year: 'numeric'
+    });
+
+    if (month !== currentMonth) {
+      currentMonth = month;
+      calendar.innerHTML += `<h3>${month}</h3>`;
+    }
+
+    const dayBookings = bookings.filter(b =>
+      dateStr >= b.from && dateStr <= b.to
+    );
+
+    let content = `<strong>${dateStr}</strong>`;
+
+    dayBookings.forEach(b => {
+      content += `<div style="color:red">${b.car}</div>`;
+    });
+
+    calendar.innerHTML += `
+      <div class="day ${dayBookings.length ? 'busy' : ''}">
+        ${content}
+      </div>
+    `;
+  }
+}
+</script>
+
+</body>
+</html>
